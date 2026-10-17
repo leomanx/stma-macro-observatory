@@ -1,0 +1,79 @@
+name: Build & Deploy STMA Dashboard to Netlify
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "public/data/dashboard.json"
+      - "app/**"
+      - "scripts/**"
+      - "package.json"
+      - "netlify.toml"
+      - ".github/workflows/deploy-netlify.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: netlify-production-deploy
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Check if Netlify Production is already up-to-date
+        id: check_live
+        run: |
+          python3 - << 'EOF'
+          import hashlib, json, os, urllib.request
+          from pathlib import Path
+
+          def fp(obj):
+              c = json.loads(json.dumps(obj))
+              if isinstance(c.get("meta"), dict):
+                  c["meta"].pop("generated_at", None)
+              return hashlib.sha256(json.dumps(c, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
+
+          local_data = json.loads(Path("public/data/dashboard.json").read_text(encoding="utf-8"))
+          local_fp = fp(local_data)
+          live_fp = None
+          try:
+              req = urllib.request.Request(
+                  "https://stma-macro-observatory.netlify.app/data/dashboard.json",
+                  headers={"User-Agent": "STMA-GitHub-Action/1.0"},
+              )
+              with urllib.request.urlopen(req, timeout=10) as r:
+                  if r.status == 200:
+                      live_fp = fp(json.loads(r.read().decode("utf-8")))
+          except Exception as e:
+              print("Could not fetch live snapshot:", e)
+
+          skip = "true" if (live_fp == local_fp and os.environ.get("GITHUB_EVENT_NAME") != "workflow_dispatch") else "false"
+          print(f"local_fp={local_fp}, live_fp={live_fp}, skip={skip}")
+          with open(os.environ["GITHUB_OUTPUT"], "a") as out:
+              out.write(f"skip={skip}\n")
+          EOF
+
+      - name: Setup Node.js 22
+        if: steps.check_live.outputs.skip != 'true'
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: "npm"
+
+      - name: Install dependencies
+        if: steps.check_live.outputs.skip != 'true'
+        run: npm ci
+
+      - name: Build Static Bundle (vinext + export_static)
+        if: steps.check_live.outputs.skip != 'true'
+        run: npm run build
+
+      - name: Deploy Static Bundle to Netlify Production
+        if: steps.check_live.outputs.skip != 'true'
+        env:
+          NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+          NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
+        run: npx netlify-cli deploy --prod --dir=dist/client --no-build
