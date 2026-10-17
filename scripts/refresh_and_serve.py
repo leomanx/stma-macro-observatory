@@ -13,10 +13,17 @@ from build_dashboard_data import build_snapshot
 import json
 
 
+def default_db_path(dashboard_dir: Path) -> Path:
+    onedrive_db = Path(r"E:\Onedrive_TeerapatCh\OneDrive\MMK\Quant\Sentiment-Analysis\WSJ\Daily\Database\sentiment.db")
+    if onedrive_db.exists():
+        return onedrive_db
+    return dashboard_dir.parents[1] / "data" / "sentiment.db"
+
+
 def main() -> int:
     dashboard_dir = Path(__file__).resolve().parents[1]
     parser = argparse.ArgumentParser()
-    parser.add_argument("--db", type=Path, default=dashboard_dir.parents[1] / "data" / "sentiment.db")
+    parser.add_argument("--db", type=Path, default=default_db_path(dashboard_dir))
     parser.add_argument("--host", default="localhost")
     parser.add_argument("--port", type=int, default=4173)
     parser.add_argument("--poll-seconds", type=float, default=5.0)
