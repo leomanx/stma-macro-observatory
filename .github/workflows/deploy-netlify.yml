@@ -5,6 +5,7 @@ on:
     branches: [main]
     paths:
       - "public/data/dashboard.json"
+      - "dist/client/**"
       - "app/**"
       - "scripts/**"
       - "package.json"
@@ -27,7 +28,7 @@ jobs:
         id: check_live
         run: |
           python3 - << 'EOF'
-          import hashlib, json, os, urllib.request
+          import hashlib, json, os, shutil, urllib.request
           from pathlib import Path
 
           def fp(obj):
@@ -36,7 +37,12 @@ jobs:
                   c["meta"].pop("generated_at", None)
               return hashlib.sha256(json.dumps(c, sort_keys=True, ensure_ascii=False, separators=(",", ":")).encode()).hexdigest()
 
-          local_data = json.loads(Path("public/data/dashboard.json").read_text(encoding="utf-8"))
+          src = Path("public/data/dashboard.json")
+          dst = Path("dist/client/data/dashboard.json")
+          dst.parent.mkdir(parents=True, exist_ok=True)
+          shutil.copyfile(src, dst)
+
+          local_data = json.loads(src.read_text(encoding="utf-8"))
           local_fp = fp(local_data)
           live_fp = None
           try:
@@ -61,19 +67,10 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: "22"
-          cache: "npm"
-
-      - name: Install dependencies
-        if: steps.check_live.outputs.skip != 'true'
-        run: npm ci
-
-      - name: Build Static Bundle (vinext + export_static)
-        if: steps.check_live.outputs.skip != 'true'
-        run: npm run build
 
       - name: Deploy Static Bundle to Netlify Production
         if: steps.check_live.outputs.skip != 'true'
         env:
           NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
           NETLIFY_SITE_ID: ${{ secrets.NETLIFY_SITE_ID }}
-        run: npx netlify-cli deploy --prod --dir=dist/client --no-build
+        run: npx --yes netlify-cli deploy --prod --dir=dist/client --no-build
